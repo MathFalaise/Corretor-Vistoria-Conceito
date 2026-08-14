@@ -37,8 +37,47 @@ class Edit:
 
 @dataclass(frozen=True)
 class ProcessResult:
-    """Resultado do processamento de um texto pelo motor."""
+    """Resultado do processamento de um texto pelo motor.
+
+    `edits` são alterações JÁ aplicadas em `corrected_text` (Camada 0
+    estrutural + Camada 1 regras determinísticas — sempre foram assim,
+    continuam sendo). `suggestions` são candidatos da Camada 2 (análise
+    contextual) que NÃO foram aplicados — corrected_text nunca reflete
+    uma sugestão sem aprovação explícita do usuário.
+    """
 
     original_text: str
     corrected_text: str
     edits: list = field(default_factory=list)
+    suggestions: list = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """Uma possível correção proposta pela Camada 2 (análise contextual).
+
+    Nunca é aplicada automaticamente — é sempre um candidato, com sua
+    confiança e a justificativa (rationale) de por que foi gerado.
+    """
+
+    corrected: str
+    confidence: float
+    rationale: str
+    category: str
+    correction_source: str = "contextual_analysis"
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    """Um trecho do texto identificado como possivelmente incongruente,
+    com um ou mais Candidate de correção, aguardando aprovação humana.
+
+    `start`/`end` são as posições do trecho `original` no texto em que
+    a análise foi feita, para permitir localizar e aplicar a sugestão
+    depois (ver engine.candidates.apply_suggestion).
+    """
+
+    original: str
+    start: int
+    end: int
+    candidates: list = field(default_factory=list)

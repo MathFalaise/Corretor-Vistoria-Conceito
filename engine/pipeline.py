@@ -10,6 +10,7 @@ sempre produz a mesma saída (sem aleatoriedade, sem chamadas externas).
 
 import re
 
+from engine.candidates import generate_candidates
 from engine.models import Edit, ProcessResult
 from engine.structural import normalize_structural
 
@@ -63,4 +64,37 @@ def process_text_full(text, rules):
         original_text=text,
         corrected_text=lexical_result.corrected_text,
         edits=structural_result.edits + lexical_result.edits,
+    )
+
+
+def analyze_text(
+    text,
+    rules,
+    room=None,
+    component=None,
+    inspection_code=None,
+    other_texts=None,
+):
+    """Camada 0 + Camada 1 (aplicadas, como sempre) + Camada 2 (sugestões).
+
+    `corrected_text` e `edits` continuam vindo exclusivamente de
+    process_text_full — nada da Camada 2 é aplicado automaticamente
+    aqui. `suggestions` traz os candidatos da análise contextual
+    (engine.candidates), gerados sobre o texto já normalizado/corrigido
+    pelas camadas 0 e 1, para não repetir uma sugestão sobre algo que
+    uma regra determinística já resolveu.
+
+    `room`, `component`, `inspection_code` e `other_texts` são aceitos
+    para deixar a assinatura pronta para quando a análise precisar
+    cruzar cômodos/vistoria (fora de escopo nesta etapa) — hoje não são
+    usados na pontuação de confiança, que considera só o texto em si.
+    """
+    base_result = process_text_full(text, rules)
+    suggestions = generate_candidates(base_result.corrected_text)
+
+    return ProcessResult(
+        original_text=text,
+        corrected_text=base_result.corrected_text,
+        edits=base_result.edits,
+        suggestions=suggestions,
     )
