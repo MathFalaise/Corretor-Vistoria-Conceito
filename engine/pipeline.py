@@ -11,6 +11,7 @@ sempre produz a mesma saída (sem aleatoriedade, sem chamadas externas).
 import re
 
 from engine.models import Edit, ProcessResult
+from engine.structural import normalize_structural
 
 
 def process_text(text, rules):
@@ -43,4 +44,23 @@ def process_text(text, rules):
         original_text=text,
         corrected_text=working_text,
         edits=edits,
+    )
+
+
+def process_text_full(text, rules):
+    """Camada 0 (normalização estrutural) seguida da Camada 1 (regras).
+
+    Não altera process_text(): é uma função nova e separada, para não
+    mudar o comportamento já validado da Etapa 1. Aplica primeiro
+    normalize_structural (engine/structural.py) e depois process_text
+    sobre o resultado, combinando os edits das duas camadas em um único
+    ProcessResult.
+    """
+    structural_result = normalize_structural(text)
+    lexical_result = process_text(structural_result.corrected_text, rules)
+
+    return ProcessResult(
+        original_text=text,
+        corrected_text=lexical_result.corrected_text,
+        edits=structural_result.edits + lexical_result.edits,
     )
