@@ -6,7 +6,8 @@
       "Bash(python -c ' *)",
       "Bash(python3)",
       "Bash(python3 -c ' *)",
-      "Bash(python -m unittest discover -s tests -t .)"
+      "Bash(python -m unittest discover -s tests -t .)",
+      "Bash(QT_QPA_PLATFORM=offscreen python3)"
     ]
   }
 }

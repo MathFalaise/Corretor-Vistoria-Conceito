@@ -34,7 +34,12 @@ from app.models import (
     format_inspection_code,
     is_valid_inspection_code,
 )
-from app.session import COPIED_MESSAGE, process_and_store
+from app.session import (
+    COPIED_MESSAGE,
+    approve_suggestion,
+    process_and_store,
+    reject_suggestion,
+)
 
 NARROW_WIDTH_THRESHOLD = 640
 EMPTY_INPUT_MESSAGE = "Digite ou cole o texto para corrigir."
@@ -312,6 +317,21 @@ class MainScreen(QWidget):
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
 
+        # Sugestões da Camada 2 (análise contextual) — nunca aplicadas
+        # sozinhas: cada uma só vira parte do resultado se aprovada.
+        suggestions_card, suggestions_layout = _card(QVBoxLayout, spacing=8)
+        suggestions_title = QLabel("SUGESTÕES")
+        suggestions_title.setObjectName("sectionLabel")
+        self.suggestions_empty_label = QLabel("Nenhuma sugestão pendente.")
+        self.suggestions_empty_label.setObjectName("statusLabel")
+        self.suggestions_rows_layout = QVBoxLayout()
+        self.suggestions_rows_layout.setSpacing(8)
+
+        suggestions_layout.addWidget(suggestions_title)
+        suggestions_layout.addWidget(self.suggestions_empty_label)
+        suggestions_layout.addLayout(self.suggestions_rows_layout)
+        self.suggestions_card = suggestions_card
+
         # Rodapé: status + nova vistoria.
         footer_row = QHBoxLayout()
         self.status_label = QLabel("")
@@ -325,6 +345,7 @@ class MainScreen(QWidget):
 
         root.addWidget(header_card)
         root.addWidget(self.splitter, stretch=1)
+        root.addWidget(self.suggestions_card)
         root.addLayout(footer_row)
 
     def start_session(self, session):
@@ -336,6 +357,7 @@ class MainScreen(QWidget):
         self.original_text_edit.clear()
         self.result_text_edit.clear()
         self.status_label.setText("")
+        self._render_suggestions([])
 
     def _on_room_changed(self, text):
         if self.session is not None:
@@ -353,13 +375,72 @@ class MainScreen(QWidget):
 
         result = process_and_store(self.session, text)
         self.result_text_edit.setPlainText(result.corrected_text)
+        self._render_suggestions(result.suggestions)
         self.status_label.setText(
-            f"Processado. {len(result.edits)} alteração(ões) aplicada(s)."
+            f"Processado. {len(result.edits)} alteração(ões) aplicada(s), "
+            f"{len(result.suggestions)} sugestão(ões) para revisão."
         )
 
     def _on_copy_result(self):
         write_clipboard_text(self.result_text_edit.toPlainText())
         self.status_label.setText(COPIED_MESSAGE)
+
+    def _render_suggestions(self, suggestions):
+        """Redesenha a lista de sugestões pendentes."""
+        while self.suggestions_rows_layout.count():
+            item = self.suggestions_rows_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        self.suggestions_empty_label.setVisible(not suggestions)
+
+        for suggestion in suggestions:
+            self.suggestions_rows_layout.addWidget(
+                self._build_suggestion_row(suggestion)
+            )
+
+    def _build_suggestion_row(self, suggestion):
+        candidate = suggestion.candidates[0]
+
+        row = QFrame()
+        row_layout = QHBoxLayout(row)
+
+        text_label = QLabel(
+            f'"{suggestion.original}" → "{candidate.corrected}" '
+            f"(confiança: {round(candidate.confidence * 100)}%)"
+        )
+        text_label.setWordWrap(True)
+
+        approve_button = QPushButton("Aprovar")
+        approve_button.clicked.connect(
+            lambda checked=False, s=suggestion: self._on_approve_suggestion(s)
+        )
+
+        reject_button = QPushButton("Rejeitar")
+        reject_button.setObjectName("secondaryButton")
+        reject_button.clicked.connect(
+            lambda checked=False, s=suggestion: self._on_reject_suggestion(s)
+        )
+
+        row_layout.addWidget(text_label, stretch=1)
+        row_layout.addWidget(approve_button)
+        row_layout.addWidget(reject_button)
+        return row
+
+    def _on_approve_suggestion(self, suggestion):
+        candidate = suggestion.candidates[0]
+        result = approve_suggestion(self.session, suggestion)
+        self.result_text_edit.setPlainText(result.corrected_text)
+        self._render_suggestions(result.suggestions)
+        self.status_label.setText(
+            f'Sugestão aprovada: "{suggestion.original}" → "{candidate.corrected}".'
+        )
+
+    def _on_reject_suggestion(self, suggestion):
+        result = reject_suggestion(self.session, suggestion)
+        self._render_suggestions(result.suggestions)
+        self.status_label.setText(f'Sugestão rejeitada: "{suggestion.original}".')
 
 
 class MainWindow(QMainWindow):
