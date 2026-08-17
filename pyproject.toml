@@ -5,7 +5,8 @@ description = "Aplicação desktop offline de pós-processamento de transcriçõ
 requires-python = ">=3.10"
 dependencies = [
     "PySide6",
+    "PyMuPDF",
 ]
 
 [tool.setuptools]
-packages = ["app", "engine", "tools"]
+packages = ["app", "engine", "tools", "pdf_import"]

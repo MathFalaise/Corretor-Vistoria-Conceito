@@ -11,6 +11,7 @@ app.session.process_and_store.
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -40,6 +41,11 @@ from app.session import (
     process_and_store,
     reject_suggestion,
 )
+from pdf_import.importer import (
+    DEFAULT_CORRECTED_DIR,
+    DEFAULT_UNCORRECTED_DIR,
+    run_import,
+)
 
 NARROW_WIDTH_THRESHOLD = 640
 EMPTY_INPUT_MESSAGE = "Digite ou cole o texto para corrigir."
@@ -56,9 +62,10 @@ def _card(layout_cls=QVBoxLayout, spacing=12):
 
 
 class HomeScreen(QWidget):
-    """Tela inicial: título, subtítulo e botão NOVA VISTORIA."""
+    """Tela inicial: título, subtítulo, NOVA VISTORIA e IMPORTAR PDFS."""
 
     start_requested = Signal()
+    import_pdfs_requested = Signal()
 
     def __init__(self):
         super().__init__()
@@ -80,10 +87,15 @@ class HomeScreen(QWidget):
         start_button = QPushButton("NOVA VISTORIA")
         start_button.clicked.connect(self.start_requested)
 
+        import_pdfs_button = QPushButton("IMPORTAR PDFS")
+        import_pdfs_button.setObjectName("secondaryButton")
+        import_pdfs_button.clicked.connect(self.import_pdfs_requested)
+
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addSpacing(8)
         layout.addWidget(start_button)
+        layout.addWidget(import_pdfs_button)
 
         centered_row = QHBoxLayout()
         centered_row.addStretch(1)
@@ -443,6 +455,124 @@ class MainScreen(QWidget):
         self.status_label.setText(f'Sugestão rejeitada: "{suggestion.original}".')
 
 
+class PdfImportScreen(QWidget):
+    """Importação offline de PDFs de vistoria (não corrigidos/corrigidos).
+
+    Só gera o dataset estruturado em data/extracted/ via
+    pdf_import.importer.run_import — não altera o fluxo principal de
+    correção (MainScreen) nem o corpus.
+    """
+
+    back_requested = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.uncorrected_dir = DEFAULT_UNCORRECTED_DIR
+        self.corrected_dir = DEFAULT_CORRECTED_DIR
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setSpacing(16)
+
+        title = QLabel("IMPORTAR PDFS DE VISTORIA")
+        title.setObjectName("titleLabel")
+
+        uncorrected_card, uncorrected_layout = _card(QHBoxLayout)
+        uncorrected_label = QLabel("PDFs NÃO CORRIGIDOS:")
+        uncorrected_label.setObjectName("sectionLabel")
+        self.uncorrected_path_label = QLabel(self.uncorrected_dir)
+        uncorrected_select_button = QPushButton("Selecionar pasta...")
+        uncorrected_select_button.clicked.connect(self._on_select_uncorrected)
+        uncorrected_layout.addWidget(uncorrected_label)
+        uncorrected_layout.addWidget(self.uncorrected_path_label, stretch=1)
+        uncorrected_layout.addWidget(uncorrected_select_button)
+
+        corrected_card, corrected_layout = _card(QHBoxLayout)
+        corrected_label = QLabel("PDFs CORRIGIDOS:")
+        corrected_label.setObjectName("sectionLabel")
+        self.corrected_path_label = QLabel(self.corrected_dir)
+        corrected_select_button = QPushButton("Selecionar pasta...")
+        corrected_select_button.clicked.connect(self._on_select_corrected)
+        corrected_layout.addWidget(corrected_label)
+        corrected_layout.addWidget(self.corrected_path_label, stretch=1)
+        corrected_layout.addWidget(corrected_select_button)
+
+        self.import_button = QPushButton("INICIAR IMPORTAÇÃO")
+        self.import_button.clicked.connect(self._on_import)
+
+        result_card, result_layout = _card(QVBoxLayout)
+        result_title = QLabel("RESULTADO")
+        result_title.setObjectName("sectionLabel")
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
+        result_layout.addWidget(result_title)
+        result_layout.addWidget(self.result_text)
+
+        back_button = QPushButton("VOLTAR")
+        back_button.setObjectName("secondaryButton")
+        back_button.clicked.connect(self.back_requested)
+
+        outer.addWidget(title)
+        outer.addWidget(uncorrected_card)
+        outer.addWidget(corrected_card)
+        outer.addWidget(self.import_button)
+        outer.addWidget(result_card, stretch=1)
+        outer.addWidget(back_button)
+
+    def _on_select_uncorrected(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Selecionar pasta de PDFs não corrigidos", self.uncorrected_dir
+        )
+        if path:
+            self.uncorrected_dir = path
+            self.uncorrected_path_label.setText(path)
+
+    def _on_select_corrected(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Selecionar pasta de PDFs corrigidos", self.corrected_dir
+        )
+        if path:
+            self.corrected_dir = path
+            self.corrected_path_label.setText(path)
+
+    def _on_import(self):
+        summary = run_import(self.uncorrected_dir, self.corrected_dir)
+        self.result_text.setPlainText(self._format_summary(summary))
+
+    @staticmethod
+    def _format_summary(summary):
+        lines = [f"Importados: {len(summary.imported)}", "", "Códigos identificados:"]
+        for item in summary.imported:
+            codigo = item.inspection_code or "(não identificado)"
+            lines.append(f"  - {item.source_file}: {codigo}")
+
+        lines.append("")
+        lines.append(f"Pares encontrados ({len(summary.paired_codes)}):")
+        for code in summary.paired_codes:
+            lines.append(f"  - {code}")
+
+        lines.append("")
+        lines.append("PDFs sem par:")
+        for code in summary.unpaired_uncorrected:
+            lines.append(f"  - {code} (só em não corrigidos)")
+        for code in summary.unpaired_corrected:
+            lines.append(f"  - {code} (só em corrigidos)")
+
+        if summary.no_code_detected:
+            lines.append("")
+            lines.append("Sem código identificado:")
+            for source_file in summary.no_code_detected:
+                lines.append(f"  - {source_file}")
+
+        if summary.errors:
+            lines.append("")
+            lines.append("Erros de leitura:")
+            for source_file, message in summary.errors:
+                lines.append(f"  - {source_file}: {message}")
+
+        return "\n".join(lines)
+
+
 class MainWindow(QMainWindow):
     """Janela principal, orquestra a navegação entre as três telas."""
 
@@ -458,20 +588,30 @@ class MainWindow(QMainWindow):
         self.home_screen = HomeScreen()
         self.new_inspection_screen = NewInspectionScreen()
         self.main_screen = MainScreen()
+        self.pdf_import_screen = PdfImportScreen()
 
         self.stack.addWidget(self.home_screen)
         self.stack.addWidget(self.new_inspection_screen)
         self.stack.addWidget(self.main_screen)
+        self.stack.addWidget(self.pdf_import_screen)
 
         self.home_screen.start_requested.connect(self._show_new_inspection)
+        self.home_screen.import_pdfs_requested.connect(self._show_pdf_import)
         self.new_inspection_screen.inspection_ready.connect(self._start_inspection)
         self.main_screen.new_inspection_requested.connect(self._show_new_inspection)
+        self.pdf_import_screen.back_requested.connect(self._show_home)
 
+        self.stack.setCurrentWidget(self.home_screen)
+
+    def _show_home(self):
         self.stack.setCurrentWidget(self.home_screen)
 
     def _show_new_inspection(self):
         self.new_inspection_screen.reset()
         self.stack.setCurrentWidget(self.new_inspection_screen)
+
+    def _show_pdf_import(self):
+        self.stack.setCurrentWidget(self.pdf_import_screen)
 
     def _start_inspection(self, code):
         session = create_session(code)
