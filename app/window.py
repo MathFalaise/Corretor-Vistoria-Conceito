@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.clipboard import read_clipboard_text, write_clipboard_text
+from app.clipboard import write_clipboard_text
 from app.models import (
     INVALID_CODE_MESSAGE,
     create_session,
@@ -34,9 +34,10 @@ from app.models import (
     format_inspection_code,
     is_valid_inspection_code,
 )
-from app.session import COPIED_MESSAGE, EMPTY_CLIPBOARD_MESSAGE, process_and_store
+from app.session import COPIED_MESSAGE, process_and_store
 
 NARROW_WIDTH_THRESHOLD = 640
+EMPTY_INPUT_MESSAGE = "Digite ou cole o texto para corrigir."
 
 
 def _card(layout_cls=QVBoxLayout, spacing=12):
@@ -281,14 +282,14 @@ class MainScreen(QWidget):
         self.splitter = _ResponsiveSplitter(Qt.Horizontal)
 
         original_panel, original_layout = _card(QVBoxLayout)
-        original_title = QLabel("TEXTO ORIGINAL")
+        original_title = QLabel("TEXTO DE ENTRADA")
         original_title.setObjectName("sectionLabel")
         self.original_text_edit = QTextEdit()
         self.original_text_edit.setPlaceholderText(
-            "Copie o texto no CloudSLIM e clique em PROCESSAR CLIPBOARD."
+            "Cole ou digite aqui o texto do CloudSLIM."
         )
-        self.process_button = QPushButton("PROCESSAR CLIPBOARD")
-        self.process_button.clicked.connect(self._on_process_clipboard)
+        self.process_button = QPushButton("CORRIGIR")
+        self.process_button.clicked.connect(self._on_correct)
         original_layout.addWidget(original_title)
         original_layout.addWidget(self.original_text_edit)
         original_layout.addWidget(self.process_button)
@@ -344,13 +345,12 @@ class MainScreen(QWidget):
         if self.session is not None:
             self.session.update_component(text)
 
-    def _on_process_clipboard(self):
-        text = read_clipboard_text()
+    def _on_correct(self):
+        text = self.original_text_edit.toPlainText()
         if not text.strip():
-            self.status_label.setText(EMPTY_CLIPBOARD_MESSAGE)
+            self.status_label.setText(EMPTY_INPUT_MESSAGE)
             return
 
-        self.original_text_edit.setPlainText(text)
         result = process_and_store(self.session, text)
         self.result_text_edit.setPlainText(result.corrected_text)
         self.status_label.setText(
