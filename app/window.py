@@ -9,6 +9,9 @@ diretamente nem duplica regras — todo processamento passa por
 app.session.process_and_store.
 """
 
+import shutil
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -16,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -455,20 +459,28 @@ class MainScreen(QWidget):
         self.status_label.setText(f'Sugestão rejeitada: "{suggestion.original}".')
 
 
+PDF_NAME_FILTER = "Arquivos PDF (*.pdf);;Todos os arquivos (*.*)"
+
+
 class PdfImportScreen(QWidget):
     """Importação offline de PDFs de vistoria (não corrigidos/corrigidos).
 
-    Só gera o dataset estruturado em data/extracted/ via
-    pdf_import.importer.run_import — não altera o fluxo principal de
-    correção (MainScreen) nem o corpus.
+    O seletor escolhe arquivos PDF individuais (QFileDialog.getOpenFileNames
+    com filtro "Arquivos PDF (*.pdf)"), mostrados numa lista antes da
+    importação. Os arquivos escolhidos são copiados para as pastas padrão
+    (data/pdfs_nao_corrigidos/, data/pdfs_corrigidos/) e então processados
+    por pdf_import.importer.run_import — o pipeline de extração/pareamento/
+    diff não muda, só a forma de escolher quais PDFs entram nele.
+
+    Não altera o fluxo principal de correção (MainScreen) nem o corpus.
     """
 
     back_requested = Signal()
 
     def __init__(self):
         super().__init__()
-        self.uncorrected_dir = DEFAULT_UNCORRECTED_DIR
-        self.corrected_dir = DEFAULT_CORRECTED_DIR
+        self.uncorrected_files = []
+        self.corrected_files = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 24, 24, 24)
@@ -477,27 +489,33 @@ class PdfImportScreen(QWidget):
         title = QLabel("IMPORTAR PDFS DE VISTORIA")
         title.setObjectName("titleLabel")
 
-        uncorrected_card, uncorrected_layout = _card(QHBoxLayout)
+        uncorrected_card, uncorrected_layout = _card(QVBoxLayout)
+        uncorrected_header = QHBoxLayout()
         uncorrected_label = QLabel("PDFs NÃO CORRIGIDOS:")
         uncorrected_label.setObjectName("sectionLabel")
-        self.uncorrected_path_label = QLabel(self.uncorrected_dir)
-        uncorrected_select_button = QPushButton("Selecionar pasta...")
+        uncorrected_select_button = QPushButton("Selecionar PDFs...")
         uncorrected_select_button.clicked.connect(self._on_select_uncorrected)
-        uncorrected_layout.addWidget(uncorrected_label)
-        uncorrected_layout.addWidget(self.uncorrected_path_label, stretch=1)
-        uncorrected_layout.addWidget(uncorrected_select_button)
+        uncorrected_header.addWidget(uncorrected_label, stretch=1)
+        uncorrected_header.addWidget(uncorrected_select_button)
+        self.uncorrected_files_list = QListWidget()
+        self.uncorrected_files_list.setMaximumHeight(90)
+        uncorrected_layout.addLayout(uncorrected_header)
+        uncorrected_layout.addWidget(self.uncorrected_files_list)
 
-        corrected_card, corrected_layout = _card(QHBoxLayout)
+        corrected_card, corrected_layout = _card(QVBoxLayout)
+        corrected_header = QHBoxLayout()
         corrected_label = QLabel("PDFs CORRIGIDOS:")
         corrected_label.setObjectName("sectionLabel")
-        self.corrected_path_label = QLabel(self.corrected_dir)
-        corrected_select_button = QPushButton("Selecionar pasta...")
+        corrected_select_button = QPushButton("Selecionar PDFs...")
         corrected_select_button.clicked.connect(self._on_select_corrected)
-        corrected_layout.addWidget(corrected_label)
-        corrected_layout.addWidget(self.corrected_path_label, stretch=1)
-        corrected_layout.addWidget(corrected_select_button)
+        corrected_header.addWidget(corrected_label, stretch=1)
+        corrected_header.addWidget(corrected_select_button)
+        self.corrected_files_list = QListWidget()
+        self.corrected_files_list.setMaximumHeight(90)
+        corrected_layout.addLayout(corrected_header)
+        corrected_layout.addWidget(self.corrected_files_list)
 
-        self.import_button = QPushButton("INICIAR IMPORTAÇÃO")
+        self.import_button = QPushButton("IMPORTAR")
         self.import_button.clicked.connect(self._on_import)
 
         result_card, result_layout = _card(QVBoxLayout)
@@ -520,23 +538,43 @@ class PdfImportScreen(QWidget):
         outer.addWidget(back_button)
 
     def _on_select_uncorrected(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Selecionar pasta de PDFs não corrigidos", self.uncorrected_dir
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Selecionar PDFs não corrigidos", "", PDF_NAME_FILTER
         )
-        if path:
-            self.uncorrected_dir = path
-            self.uncorrected_path_label.setText(path)
+        if paths:
+            self.uncorrected_files = paths
+            self._populate_files_list(self.uncorrected_files_list, paths)
 
     def _on_select_corrected(self):
-        path = QFileDialog.getExistingDirectory(
-            self, "Selecionar pasta de PDFs corrigidos", self.corrected_dir
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Selecionar PDFs corrigidos", "", PDF_NAME_FILTER
         )
-        if path:
-            self.corrected_dir = path
-            self.corrected_path_label.setText(path)
+        if paths:
+            self.corrected_files = paths
+            self._populate_files_list(self.corrected_files_list, paths)
+
+    @staticmethod
+    def _populate_files_list(list_widget, paths):
+        list_widget.clear()
+        list_widget.addItems(paths)
+
+    @staticmethod
+    def _stage_files(paths, destination_dir):
+        """Copia os PDFs selecionados para a pasta padrão que o
+        pipeline (pdf_import.importer) já sabe ler — não altera o
+        pipeline, só garante que os arquivos escolhidos estejam lá."""
+        destination = Path(destination_dir)
+        destination.mkdir(parents=True, exist_ok=True)
+        for path in paths:
+            shutil.copy2(path, destination / Path(path).name)
 
     def _on_import(self):
-        summary = run_import(self.uncorrected_dir, self.corrected_dir)
+        if self.uncorrected_files:
+            self._stage_files(self.uncorrected_files, DEFAULT_UNCORRECTED_DIR)
+        if self.corrected_files:
+            self._stage_files(self.corrected_files, DEFAULT_CORRECTED_DIR)
+
+        summary = run_import(DEFAULT_UNCORRECTED_DIR, DEFAULT_CORRECTED_DIR)
         self.result_text.setPlainText(self._format_summary(summary))
 
     @staticmethod

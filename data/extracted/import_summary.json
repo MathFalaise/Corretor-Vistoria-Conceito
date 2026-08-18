@@ -1,0 +1,22 @@
+{
+  "imported_count": 2,
+  "imported": [
+    {
+      "source_file": "data\\pdfs_nao_corrigidos\\Arquivo não corrigido 2.pdf",
+      "inspection_code": "00471.002.02"
+    },
+    {
+      "source_file": "data\\pdfs_corrigidos\\Arquivo corrigido.pdf",
+      "inspection_code": "00471.002.05"
+    }
+  ],
+  "errors": [],
+  "no_code_detected": [],
+  "paired_codes": [],
+  "unpaired_uncorrected": [
+    "00471.002.02"
+  ],
+  "unpaired_corrected": [
+    "00471.002.05"
+  ]
+}
