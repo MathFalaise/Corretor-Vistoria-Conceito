@@ -45,24 +45,16 @@ from app.session import (
     process_and_store,
     reject_suggestion,
 )
+from app.widgets import _card, _InspectionCodeLineEdit
 from pdf_import.importer import (
     DEFAULT_CORRECTED_DIR,
     DEFAULT_UNCORRECTED_DIR,
     run_import,
 )
+from app.window_v2 import CorrigirVistoriaScreen, V2HomeScreen, VistoriaJeanScreen
 
 NARROW_WIDTH_THRESHOLD = 640
 EMPTY_INPUT_MESSAGE = "Digite ou cole o texto para corrigir."
-
-
-def _card(layout_cls=QVBoxLayout, spacing=12):
-    """Cria um QFrame com objectName 'card' (estilizado em styles.py)."""
-    frame = QFrame()
-    frame.setObjectName("card")
-    layout = layout_cls(frame)
-    layout.setContentsMargins(28, 28, 28, 28)
-    layout.setSpacing(spacing)
-    return frame, layout
 
 
 class HomeScreen(QWidget):
@@ -108,53 +100,6 @@ class HomeScreen(QWidget):
 
         outer.addLayout(centered_row)
         outer.addStretch(1)
-
-
-class _InspectionCodeLineEdit(QLineEdit):
-    """QLineEdit do código da vistoria.
-
-    A filtragem de caracteres e a inserção automática dos pontos vêm de
-    NewInspectionScreen._on_code_text_changed (via sinal textChanged).
-    Esta subclasse só existe para Backspace/Delete: sem ela, apagar o
-    caractere logo antes/depois de um ponto automático (ex.: o ponto de
-    "00000.") faria o handler de textChanged reinserir o mesmo ponto
-    imediatamente, e o campo pareceria "travado". Aqui a remoção é
-    feita em termos de dígitos, não de caracteres — sempre remove um
-    dígito de verdade, mantendo a formatação consistente.
-    """
-
-    def keyPressEvent(self, event):
-        if not self.hasSelectedText() and event.key() in (
-            Qt.Key_Backspace,
-            Qt.Key_Delete,
-        ):
-            if self._delete_one_digit(event.key()):
-                return
-        super().keyPressEvent(event)
-
-    def _delete_one_digit(self, key):
-        text = self.text()
-        cursor_pos = self.cursorPosition()
-        digits = extract_inspection_digits(text)
-        digit_index = len(extract_inspection_digits(text[:cursor_pos]))
-
-        if key == Qt.Key_Backspace:
-            if digit_index == 0:
-                return False
-            new_digits = digits[: digit_index - 1] + digits[digit_index:]
-            new_digit_count = digit_index - 1
-        else:
-            if digit_index >= len(digits):
-                return False
-            new_digits = digits[:digit_index] + digits[digit_index + 1 :]
-            new_digit_count = digit_index
-
-        formatted = format_inspection_code(new_digits)
-        self.setText(formatted)
-        self.setCursorPosition(
-            cursor_position_after_digit_count(formatted, new_digit_count)
-        )
-        return True
 
 
 class NewInspectionScreen(QWidget):
@@ -628,10 +573,20 @@ class MainWindow(QMainWindow):
         self.main_screen = MainScreen()
         self.pdf_import_screen = PdfImportScreen()
 
+        # V2: nova tela inicial (Corrigir Vistoria / Vistoria Jean). As
+        # telas V1 acima continuam existindo e funcionando (testadas),
+        # só deixam de ser o ponto de entrada do app.
+        self.v2_home_screen = V2HomeScreen()
+        self.corrigir_vistoria_screen = CorrigirVistoriaScreen()
+        self.vistoria_jean_screen = VistoriaJeanScreen()
+
         self.stack.addWidget(self.home_screen)
         self.stack.addWidget(self.new_inspection_screen)
         self.stack.addWidget(self.main_screen)
         self.stack.addWidget(self.pdf_import_screen)
+        self.stack.addWidget(self.v2_home_screen)
+        self.stack.addWidget(self.corrigir_vistoria_screen)
+        self.stack.addWidget(self.vistoria_jean_screen)
 
         self.home_screen.start_requested.connect(self._show_new_inspection)
         self.home_screen.import_pdfs_requested.connect(self._show_pdf_import)
@@ -639,7 +594,14 @@ class MainWindow(QMainWindow):
         self.main_screen.new_inspection_requested.connect(self._show_new_inspection)
         self.pdf_import_screen.back_requested.connect(self._show_home)
 
-        self.stack.setCurrentWidget(self.home_screen)
+        self.v2_home_screen.corrigir_vistoria_requested.connect(
+            self._show_corrigir_vistoria
+        )
+        self.v2_home_screen.vistoria_jean_requested.connect(self._show_vistoria_jean)
+        self.corrigir_vistoria_screen.back_requested.connect(self._show_v2_home)
+        self.vistoria_jean_screen.back_requested.connect(self._show_v2_home)
+
+        self.stack.setCurrentWidget(self.v2_home_screen)
 
     def _show_home(self):
         self.stack.setCurrentWidget(self.home_screen)
@@ -650,6 +612,15 @@ class MainWindow(QMainWindow):
 
     def _show_pdf_import(self):
         self.stack.setCurrentWidget(self.pdf_import_screen)
+
+    def _show_v2_home(self):
+        self.stack.setCurrentWidget(self.v2_home_screen)
+
+    def _show_corrigir_vistoria(self):
+        self.stack.setCurrentWidget(self.corrigir_vistoria_screen)
+
+    def _show_vistoria_jean(self):
+        self.stack.setCurrentWidget(self.vistoria_jean_screen)
 
     def _start_inspection(self, code):
         session = create_session(code)
